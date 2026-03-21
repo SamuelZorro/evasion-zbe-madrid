@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analizador de Rutas ZBE Madrid</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- Turf.js for Spatial Analysis -->
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        #map { height: 100%; width: 100%; z-index: 10; }
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 3px solid #3498db;
+            width: 20px;
+            height: 20px;
+            -webkit-animation: spin 1s linear infinite;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .custom-marker {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            color: white;
+            font-weight: bold;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 flex flex-col h-screen overflow-hidden font-sans text-gray-800">
+
+    <header class="bg-slate-900 text-white p-4 shadow-md flex justify-between items-center z-20 relative">
+        <div class="flex items-center gap-2">
+            <i class="ph-fill ph-car-profile text-2xl text-indigo-400"></i>
+            <h1 class="text-xl font-bold tracking-tight">Evasión Activa ZBE Madrid</h1>
+        </div>
+        <div id="system-status" class="flex items-center gap-2 text-sm">
+            <span class="flex h-3 w-3 relative">
+                <span id="status-ping" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
+                <span id="status-dot" class="relative inline-flex rounded-full h-3 w-3 bg-yellow-500"></span>
+            </span>
+            <span id="status-text">Inicializando sistemas...</span>
+        </div>
+    </header>
+
+    <main class="flex-1 flex flex-col md:flex-row relative z-10">
+        <aside class="w-full md:w-96 bg-white shadow-xl flex flex-col z-20 overflow-y-auto">
+            <div class="p-6 flex-1">
+                <h2 class="text-lg font-semibold mb-4 text-slate-800 border-b pb-2">Configuración de Evasión</h2>
+                
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Punto de Salida</label>
+                        <div class="relative">
+                            <i class="ph ph-map-pin absolute left-3 top-3 text-gray-400"></i>
+                            <input type="text" id="input-start" placeholder="Ej: Toledo" 
+                                class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Destino</label>
+                        <div class="relative">
+                            <i class="ph ph-flag-checkered absolute left-3 top-3 text-gray-400"></i>
+                            <input type="text" id="input-end" placeholder="Ej: Chamartín, Madrid" 
+                                class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                        </div>
+                    </div>
+
+                    <button id="btn-calculate" onclick="calculateRoute()" 
+                        class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 rounded-lg transition-colors flex justify-center items-center gap-2 disabled:bg-gray-400">
+                        <i class="ph ph-path text-lg"></i>
+                        <span>Generar Ruta de Evasión</span>
+                    </button>
+                </div>
+
+                <div id="results-panel" class="mt-8 hidden">
+                    <h3 class="text-md font-bold text-slate-800 mb-3 border-b pb-2">Diagnóstico de Ruta</h3>
+                    
+                    <div id="loading-indicator" class="hidden flex items-center gap-3 text-indigo-600 mb-4">
+                        <div class="loader" style="border-top-color: #4f46e5;"></div>
+                        <span class="text-sm font-medium">Calculando topología de evasión...</span>
+                    </div>
+
+                    <div id="route-info" class="bg-gray-100 p-3 rounded-lg mb-4 text-sm hidden">
+                        <p><strong>Distancia:</strong> <span id="route-dist"></span> km</p>
+                        <p><strong>Tiempo est.:</strong> <span id="route-time"></span> min</p>
+                        
+                        <!-- NUEVO BOTÓN DE EXPORTACIÓN A GOOGLE MAPS -->
+                        <button id="btn-export-gmaps" onclick="exportToGoogleMaps()" 
+                            class="mt-4 w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 rounded-lg transition-colors flex justify-center items-center gap-2 hidden">
+                            <i class="ph ph-google-logo text-lg"></i>
+                            <span>Navegar en Google Maps</span>
+                        </button>
+                    </div>
+
+                    <div id="alert-box" class="p-4 rounded-lg border hidden"></div>
+                </div>
+            </div>
+            
+            <div class="bg-slate-50 p-4 border-t text-xs text-slate-500">
+                <p><strong>Motor:</strong> OpenRouteService (ORS) con inyección de exclusión de polígonos.</p>
+                <p class="mt-1 text-red-600 font-semibold cursor-pointer" onclick="alert('Regístrate gratis en openrouteservice.org y pega tu clave en la constante ORS_API_KEY en el código fuente.')">⚠ Requiere ORS API KEY</p>
+            </div>
+        </aside>
+
+        <div class="flex-1 relative">
+            <div id="map"></div>
+        </div>
+    </main>
+
+    <script>
+        // --- CONSTANTES CRÍTICAS ---
+        const ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjA0M2YxYjIyMzg0NTQ2ZmFhMDEwYTZiZjJhN2Q4YjYzIiwiaCI6Im11cm11cjY0In0="; 
+        
+        let map;
+        let zbeData = null; 
+        let currentRouteLayer = null;
+        let markersLayer = new L.LayerGroup();
+        let currentRouteCoordinates = []; // VARIABLE GLOBAL NUEVA para almacenar el trazado
+        
+        const MAP_CENTER = [40.4168, -3.7038]; 
+        const MAP_ZOOM = 13;
+        const ZBE_BASE_API_URL = "https://sigma.madrid.es/hosted/rest/services/GEOPORTAL/MADRID_ZBE/MapServer/";
+        // Restricción nativa de API: countrycodes=es fuerza resultados exclusivamente en España
+        const NOMINATIM_API = "https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=es&q=";
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initMap();
+            fetchZBEData();
+        });
+
+        function initMap() {
+            map = L.map('map', { zoomControl: false }).setView(MAP_CENTER, MAP_ZOOM);
+            L.control.zoom({ position: 'bottomright' }).addTo(map);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap contributors, &copy; CARTO',
+                maxZoom: 19
+            }).addTo(map);
+            markersLayer.addTo(map);
+        }
+
+        function updateSystemStatus(status, type = 'info') {
+            const dot = document.getElementById('status-dot');
+            const ping = document.getElementById('status-ping');
+            document.getElementById('status-text').textContent = status;
+            
+            if (type === 'success') {
+                dot.className = 'relative inline-flex rounded-full h-3 w-3 bg-green-500'; ping.className = 'hidden';
+            } else if (type === 'error') {
+                dot.className = 'relative inline-flex rounded-full h-3 w-3 bg-red-500'; ping.className = 'hidden';
+            } else if (type === 'warning') {
+                dot.className = 'relative inline-flex rounded-full h-3 w-3 bg-yellow-500';
+                ping.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75';
+            }
+        }
+
+        async function fetchZBEData() {
+            updateSystemStatus('Descargando topología de Madrid...', 'warning');
+            try {
+                const layersToQuery = [0, 1, 2, 3]; 
+                let allFeatures = [];
+
+                for (const layerId of layersToQuery) {
+                    const url = `${ZBE_BASE_API_URL}${layerId}/query?where=1%3D1&outFields=*&f=geojson&outSR=4326`;
+                    try {
+                        const response = await fetch(url);
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (data.features) allFeatures = allFeatures.concat(data.features);
+                        }
+                    } catch (e) { console.warn(`Capa ${layerId} falló.`); }
+                }
+
+                zbeData = { type: "FeatureCollection", features: allFeatures };
+                
+                L.geoJSON(zbeData, {
+                    pointToLayer: (feature, latlng) => L.circleMarker(latlng, { radius: 5, fillColor: "#f97316", color: "#fff", weight: 1, opacity: 1, fillOpacity: 0.9 }),
+                    style: (feature) => feature.geometry.type !== 'Point' ? { color: '#e11d48', weight: 2, opacity: 0.6, fillColor: '#f43f5e', fillOpacity: 0.15 } : {}
+                }).addTo(map);
+
+                updateSystemStatus(`Datos geolocalizados (${allFeatures.length} obstáculos)`, 'success');
+            } catch (error) {
+                console.error(error);
+                updateSystemStatus('Error topológico', 'error');
+            }
+        }
+
+        // Geocodificación clásica vía Nominatim (Optimizada estrictamente para España)
+        async function geocodeAddress(address) {
+            let searchAddress = address.trim();
+            
+            // Inspección del string: Solo añadimos "España" si el usuario no lo ha incluido ya (evita "Toledo, España, España")
+            if (!/españa|spain/i.test(searchAddress)) {
+                searchAddress += ', España';
+            }
+
+            const response = await fetch(NOMINATIM_API + encodeURIComponent(searchAddress), { headers: { 'Accept-Language': 'es' }});
+            const data = await response.json();
+            
+            if (data && data.length > 0) return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+            throw new Error(`Geolocalización fallida: No se ha encontrado la ubicación "${address}" dentro de España.`);
+        }
+
+        // --- EL NÚCLEO ARQUITECTÓNICO MEJORADO ---
+        function buildAvoidancePolygons(startPoint, endPoint) {
+            if (!zbeData) return null;
+            let avoidPolygonsCoords = [];
+
+            try {
+                turf.featureEach(zbeData, (feature) => {
+                    let startInside = false;
+                    let endInside = false;
+
+                    // NUEVO: Detectar si el origen o destino están DENTRO del polígono.
+                    if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon') {
+                        startInside = turf.booleanPointInPolygon(startPoint, feature);
+                        endInside = turf.booleanPointInPolygon(endPoint, feature);
+                    }
+
+                    // Si el usuario empieza o termina dentro de esta zona, es imposible evitarla. La ignoramos de las restricciones.
+                    if (startInside || endInside) {
+                        return; // Omitimos este obstáculo para que el motor pueda sacarnos o meternos del área
+                    }
+
+                    if (feature.geometry.type === 'Point') {
+                        const buffered = turf.buffer(feature, 0.05, {units: 'kilometers', steps: 4});
+                        
+                        // Verificar que tampoco empiece exactamente encima del punto buffer de la cámara
+                        if (turf.booleanPointInPolygon(startPoint, buffered) || turf.booleanPointInPolygon(endPoint, buffered)) {
+                            return;
+                        }
+                        
+                        avoidPolygonsCoords.push(buffered.geometry.coordinates);
+                    } else if (feature.geometry.type === 'Polygon') {
+                        const simplified = turf.simplify(feature, {tolerance: 0.005, highQuality: false});
+                        avoidPolygonsCoords.push(simplified.geometry.coordinates);
+                    } else if (feature.geometry.type === 'MultiPolygon') {
+                        const simplified = turf.simplify(feature, {tolerance: 0.005, highQuality: false});
+                        simplified.geometry.coordinates.forEach(polyCoords => avoidPolygonsCoords.push(polyCoords));
+                    }
+                });
+
+                if (avoidPolygonsCoords.length === 0) return null;
+
+                return {
+                    type: "MultiPolygon",
+                    coordinates: avoidPolygonsCoords.filter(c => c && c.length > 0)
+                };
+            } catch (e) {
+                console.error("Error construyendo matriz de exclusión:", e);
+                return null;
+            }
+        }
+
+        async function fetchEvadingRoute(start, end, avoidGeometry) {
+            if (ORS_API_KEY === "TU_API_KEY_DE_OPENROUTESERVICE_AQUI") {
+                throw new Error("SISTEMA BLOQUEADO: Debes configurar una API Key de OpenRouteService válida en el código fuente para realizar enrutamiento avanzado.");
+            }
+
+            const payload = {
+                coordinates: [[start.lon, start.lat], [end.lon, end.lat]],
+                elevation: false,
+                instructions: false
+            };
+
+            if (avoidGeometry && avoidGeometry.coordinates.length > 0) {
+                payload.options = { avoid_polygons: avoidGeometry };
+            }
+
+            let response;
+            try {
+                response = await fetch("https://api.openrouteservice.org/v2/directions/driving-car/geojson", {
+                    method: "POST",
+                    headers: {
+                        "Accept": "application/json, application/geo+json",
+                        "Content-Type": "application/json",
+                        "Authorization": ORS_API_KEY
+                    },
+                    body: JSON.stringify(payload)
+                });
+            } catch (networkError) {
+                console.error("Error Crítico de Red o CORS:", networkError);
+                throw new Error("Fallo de conexión con el motor ORS (Failed to fetch). Revisa que la clave sea válida.");
+            }
+
+            if (!response.ok) {
+                let errData;
+                try {
+                    errData = await response.json();
+                } catch(e) {
+                    throw new Error(`Fallo del motor ORS (HTTP ${response.status}).`);
+                }
+                
+                const errMsg = errData.error?.message || "";
+                // NUEVO: Capturar específicamente el error de "Route could not be found" (Código 2010 u otro equivalente)
+                if (errData.error?.code === 2010 || errMsg.toLowerCase().includes("could not be found")) {
+                    throw new Error("ROUTE_NOT_FOUND"); // Etiqueta técnica controlada para ejecutar el Plan B
+                }
+                
+                throw new Error(`Fallo del motor ORS: ${errMsg || response.statusText}`);
+            }
+
+            return await response.json();
+        }
+
+        async function calculateRoute() {
+            const startInput = document.getElementById('input-start').value.trim();
+            const endInput = document.getElementById('input-end').value.trim();
+            const btn = document.getElementById('btn-calculate');
+            const resultsPanel = document.getElementById('results-panel');
+            const loadingIndicator = document.getElementById('loading-indicator');
+            const routeInfo = document.getElementById('route-info');
+            const alertBox = document.getElementById('alert-box');
+
+            if (!startInput || !endInput) return alert("Faltan datos de origen o destino.");
+
+            btn.disabled = true;
+            resultsPanel.classList.remove('hidden');
+            loadingIndicator.classList.remove('hidden');
+            routeInfo.classList.add('hidden');
+            alertBox.classList.add('hidden');
+            document.getElementById('btn-export-gmaps').classList.add('hidden'); // Ocultar botón al recalcular
+            
+            if (currentRouteLayer) map.removeLayer(currentRouteLayer);
+            markersLayer.clearLayers();
+            currentRouteCoordinates = []; // Limpiar trazado anterior
+
+            try {
+                // 1. Geocodificar
+                const startCoords = await geocodeAddress(startInput);
+                const endCoords = await geocodeAddress(endInput);
+
+                createCustomMarker(startCoords.lat, startCoords.lon, 'A', '#4f46e5').addTo(markersLayer); 
+                createCustomMarker(endCoords.lat, endCoords.lon, 'B', '#10b981').addTo(markersLayer); 
+
+                // 2. Construir matriz matemática (Omitiendo zonas donde el coche ya está dentro)
+                const startPoint = turf.point([startCoords.lon, startCoords.lat]);
+                const endPoint = turf.point([endCoords.lon, endCoords.lat]);
+                const obstaclesMultiPolygon = buildAvoidancePolygons(startPoint, endPoint);
+
+                // 3. Sistema de Evasión con Fallback
+                let routeData;
+                let isSafe = true;
+
+                if (obstaclesMultiPolygon) {
+                    try {
+                        routeData = await fetchEvadingRoute(startCoords, endCoords, obstaclesMultiPolygon);
+                    } catch (evasionError) {
+                        if (evasionError.message === "ROUTE_NOT_FOUND") {
+                            console.warn("Evasión imposible o calles bloqueadas. Ejecutando ruteo estándar sin restricciones...");
+                            // PLAN B: Ruta normal ignorando todas las restricciones
+                            routeData = await fetchEvadingRoute(startCoords, endCoords, null);
+                            isSafe = false;
+                        } else {
+                            throw evasionError; // Otros errores de red/API
+                        }
+                    }
+                } else {
+                    // Si no hubo obstáculos (ej: no se cargaron los datos)
+                    routeData = await fetchEvadingRoute(startCoords, endCoords, null);
+                }
+
+                const feature = routeData.features[0];
+                currentRouteCoordinates = feature.geometry.coordinates; // GUARDAMOS EL TRAZADO PARA EXPORTAR
+
+                // 4. Dibujar la ruta ganadora (Azul/Punteada si es segura, Roja sólida si es el Plan B)
+                const routeColor = isSafe ? '#4f46e5' : '#ef4444';
+                const dashArray = isSafe ? '5, 10' : null;
+
+                currentRouteLayer = L.geoJSON(feature, {
+                    style: { color: routeColor, weight: 6, opacity: 0.9, dashArray: dashArray }
+                }).addTo(map);
+
+                map.fitBounds(currentRouteLayer.getBounds(), { padding: [50, 50] });
+
+                document.getElementById('route-dist').textContent = (feature.properties.summary.distance / 1000).toFixed(2);
+                document.getElementById('route-time').textContent = Math.round(feature.properties.summary.duration / 60);
+                routeInfo.classList.remove('hidden');
+
+                // Mostrar botón de Google Maps solo si la ruta se calculó (sea segura o fallback)
+                if (currentRouteCoordinates.length > 0) {
+                    document.getElementById('btn-export-gmaps').classList.remove('hidden');
+                }
+
+                // Mostrar el diagnóstico acorde
+                if (isSafe) {
+                    showSystemAlert(
+                        "Operación Exitosa: El algoritmo modificó activamente la ruta para esquivar las cámaras y zonas restringidas ZBE.", 
+                        "success"
+                    );
+                } else {
+                    showSystemAlert(
+                        "Evasión Imposible: La densidad de las ZBE y cámaras cortan todas las rutas posibles entre estos dos puntos. Se muestra la ruta óptima, pero cometerás infracción.", 
+                        "danger"
+                    );
+                }
+
+            } catch (error) {
+                console.error(error);
+                showSystemAlert(`Fallo del sistema: ${error.message}`, 'error');
+            } finally {
+                loadingIndicator.classList.add('hidden');
+                btn.disabled = false;
+            }
+        }
+
+        function createCustomMarker(lat, lng, label, color) {
+            const icon = L.divIcon({
+                className: 'custom-icon',
+                html: `<div class="custom-marker" style="background-color: ${color}; width: 30px; height: 30px;">${label}</div>`,
+                iconSize: [30, 30],
+                iconAnchor: [15, 15]
+            });
+            return L.marker([lat, lng], { icon: icon });
+        }
+
+        function showSystemAlert(message, type) {
+            const box = document.getElementById('alert-box');
+            box.classList.remove('hidden', 'bg-red-50', 'bg-green-50', 'bg-yellow-50', 'border-red-200', 'border-green-200', 'border-yellow-200', 'text-red-800', 'text-green-800', 'text-yellow-800');
+            
+            let icon = '';
+            if (type === 'danger' || type === 'error') {
+                box.classList.add('bg-red-50', 'border-red-200', 'text-red-800');
+                icon = '<i class="ph-fill ph-warning-octagon text-xl"></i>';
+            } else if (type === 'success') {
+                box.classList.add('bg-green-50', 'border-green-200', 'text-green-800');
+                icon = '<i class="ph-fill ph-check-circle text-xl"></i>';
+            }
+
+            box.innerHTML = `<div class="flex items-start gap-3"><div class="mt-0.5">${icon}</div><p class="text-sm font-medium leading-relaxed">${message}</p></div>`;
+            box.classList.remove('hidden');
+        }
+
+        // --- NUEVA FUNCIÓN: EXPORTACIÓN A GOOGLE MAPS ---
+        function exportToGoogleMaps() {
+            if (!currentRouteCoordinates || currentRouteCoordinates.length < 2) return;
+
+            // ORS devuelve [lon, lat], Google Maps necesita [lat, lon]
+            const coords = currentRouteCoordinates;
+            const startNode = coords[0];
+            const endNode = coords[coords.length - 1];
+
+            const originStr = `${startNode[1]},${startNode[0]}`;
+            const destStr = `${endNode[1]},${endNode[0]}`;
+
+            // Límite práctico de Waypoints en la URL de Google Maps es ~9.
+            // Extraeremos 8 puntos intermedios equidistantes del trazado de ORS para guiar a Google.
+            const maxWaypoints = 8;
+            let waypoints = [];
+
+            if (coords.length > 2) {
+                // Calcular el salto para tomar puntos espaciados uniformemente
+                const step = Math.max(1, Math.floor((coords.length - 2) / (maxWaypoints + 1)));
+                
+                for (let i = step; i < coords.length - 1 && waypoints.length < maxWaypoints; i += step) {
+                    waypoints.push(`${coords[i][1]},${coords[i][0]}`);
+                }
+            }
+
+            // Construcción de la URL de navegación de Google Maps
+            let gmapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${originStr}&destination=${destStr}&travelmode=driving`;
+            
+            if (waypoints.length > 0) {
+                // Añadimos los puntos intermedios unidos por el caracter pipe "|"
+                gmapsUrl += `&waypoints=${waypoints.join('%7C')}`;
+            }
+
+            // Abrir en nueva pestaña (en un móvil suele disparar la app nativa de Google Maps)
+            window.open(gmapsUrl, '_blank');
+        }
+    </script>
+</body>
+</html>
