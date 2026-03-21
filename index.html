@@ -2,28 +2,25 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Analizador de Rutas ZBE Madrid</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Evasión Activa ZBE Madrid</title>
     
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- Leaflet CSS & JS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
-    <!-- Turf.js for Spatial Analysis -->
     <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
     
-    <!-- Phosphor Icons -->
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
 
     <style>
+        body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; }
         #map { height: 100%; width: 100%; z-index: 10; }
         .loader {
             border: 3px solid #f3f3f3;
             border-radius: 50%;
-            border-top: 3px solid #3498db;
+            border-top: 3px solid #4f46e5;
             width: 20px;
             height: 20px;
             -webkit-animation: spin 1s linear infinite;
@@ -42,36 +39,64 @@
             font-weight: bold;
             box-shadow: 0 2px 5px rgba(0,0,0,0.5);
         }
+        /* Mobile panel transition */
+        #control-panel { transition: transform 0.3s ease-in-out; }
+        .panel-hidden { transform: translateY(calc(100% - 3rem)); }
+        @media (min-width: 768px) {
+            .panel-hidden { transform: none; } /* Disable hide logic on desktop */
+        }
+        /* User location pulse effect */
+        .user-locator-pulse {
+            background-color: #3b82f6;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.4);
+            border: 2px solid white;
+        }
     </style>
 </head>
-<body class="bg-gray-50 flex flex-col h-screen overflow-hidden font-sans text-gray-800">
+<body class="bg-gray-50 flex flex-col h-screen font-sans text-gray-800 relative">
 
-    <header class="bg-slate-900 text-white p-4 shadow-md flex justify-between items-center z-20 relative">
+    <header class="bg-slate-900 text-white p-3 md:p-4 shadow-md flex justify-between items-center z-30 relative shrink-0">
         <div class="flex items-center gap-2">
-            <i class="ph-fill ph-car-profile text-2xl text-indigo-400"></i>
-            <h1 class="text-xl font-bold tracking-tight">Evasión Activa ZBE Madrid</h1>
+            <i class="ph-fill ph-car-profile text-xl md:text-2xl text-indigo-400"></i>
+            <h1 class="text-lg md:text-xl font-bold tracking-tight">Evasión ZBE</h1>
         </div>
-        <div id="system-status" class="flex items-center gap-2 text-sm">
+        <div id="system-status" class="flex items-center gap-2 text-xs md:text-sm">
             <span class="flex h-3 w-3 relative">
                 <span id="status-ping" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
                 <span id="status-dot" class="relative inline-flex rounded-full h-3 w-3 bg-yellow-500"></span>
             </span>
-            <span id="status-text">Inicializando sistemas...</span>
+            <span id="status-text" class="hidden sm:inline">Inicializando...</span>
         </div>
     </header>
 
-    <main class="flex-1 flex flex-col md:flex-row relative z-10">
-        <aside class="w-full md:w-96 bg-white shadow-xl flex flex-col z-20 overflow-y-auto">
-            <div class="p-6 flex-1">
-                <h2 class="text-lg font-semibold mb-4 text-slate-800 border-b pb-2">Configuración de Evasión</h2>
+    <main class="flex-1 flex flex-col md:flex-row relative z-10 overflow-hidden">
+        
+        <div class="md:hidden absolute bottom-[calc(100%-3rem)] w-full bg-white z-30 rounded-t-2xl shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] cursor-pointer border-b" id="mobile-toggle" onclick="toggleMobilePanel()">
+            <div class="flex justify-center items-center h-12">
+                <div class="w-12 h-1.5 bg-gray-300 rounded-full mb-1"></div>
+            </div>
+            <div class="absolute top-3 left-4 text-sm font-bold text-gray-600">Ruta & Controles</div>
+        </div>
+
+        <aside id="control-panel" class="w-full md:w-96 bg-white shadow-xl flex flex-col z-20 absolute md:relative bottom-0 md:bottom-auto h-[75vh] md:h-full rounded-t-2xl md:rounded-none panel-hidden">
+            <div class="p-4 md:p-6 flex-1 overflow-y-auto mt-10 md:mt-0">
+                <h2 class="text-lg font-semibold mb-4 text-slate-800 border-b pb-2 hidden md:block">Configuración de Evasión</h2>
                 
                 <div class="space-y-4">
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">Punto de Salida</label>
-                        <div class="relative">
-                            <i class="ph ph-map-pin absolute left-3 top-3 text-gray-400"></i>
-                            <input type="text" id="input-start" placeholder="Ej: Toledo" 
-                                class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                        <div class="relative flex gap-2">
+                            <div class="relative flex-1">
+                                <i class="ph ph-map-pin absolute left-3 top-3 text-gray-400"></i>
+                                <input type="text" id="input-start" placeholder="Ej: Toledo" 
+                                    class="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-sm">
+                            </div>
+                            <button onclick="useCurrentLocationForStart()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 p-2 rounded-lg border border-gray-300 transition-colors shrink-0" title="Usar mi ubicación actual">
+                                <i class="ph ph-crosshair text-lg"></i>
+                            </button>
                         </div>
                     </div>
                     
@@ -80,49 +105,54 @@
                         <div class="relative">
                             <i class="ph ph-flag-checkered absolute left-3 top-3 text-gray-400"></i>
                             <input type="text" id="input-end" placeholder="Ej: Chamartín, Madrid" 
-                                class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                                class="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-sm">
                         </div>
                     </div>
 
                     <button id="btn-calculate" onclick="calculateRoute()" 
-                        class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 rounded-lg transition-colors flex justify-center items-center gap-2 disabled:bg-gray-400">
+                        class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 rounded-lg transition-colors flex justify-center items-center gap-2 disabled:bg-gray-400 shadow-md">
                         <i class="ph ph-path text-lg"></i>
                         <span>Generar Ruta de Evasión</span>
                     </button>
                 </div>
 
-                <div id="results-panel" class="mt-8 hidden">
-                    <h3 class="text-md font-bold text-slate-800 mb-3 border-b pb-2">Diagnóstico de Ruta</h3>
+                <div id="results-panel" class="mt-6 hidden pb-6">
+                    <h3 class="text-md font-bold text-slate-800 mb-3 border-b pb-2">Diagnóstico</h3>
                     
                     <div id="loading-indicator" class="hidden flex items-center gap-3 text-indigo-600 mb-4">
-                        <div class="loader" style="border-top-color: #4f46e5;"></div>
-                        <span class="text-sm font-medium">Calculando topología de evasión...</span>
+                        <div class="loader"></div>
+                        <span class="text-sm font-medium">Calculando topología...</span>
                     </div>
 
-                    <div id="route-info" class="bg-gray-100 p-3 rounded-lg mb-4 text-sm hidden">
+                    <div id="route-info" class="bg-gray-100 p-3 rounded-lg mb-4 text-sm hidden border border-gray-200">
                         <p><strong>Distancia:</strong> <span id="route-dist"></span> km</p>
                         <p><strong>Tiempo est.:</strong> <span id="route-time"></span> min</p>
                         
-                        <!-- NUEVO BOTÓN DE EXPORTACIÓN A GOOGLE MAPS -->
                         <button id="btn-export-gmaps" onclick="exportToGoogleMaps()" 
-                            class="mt-4 w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 rounded-lg transition-colors flex justify-center items-center gap-2 hidden">
+                            class="mt-3 w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 rounded-lg transition-colors flex justify-center items-center gap-2 hidden shadow">
                             <i class="ph ph-google-logo text-lg"></i>
-                            <span>Navegar en Google Maps</span>
+                            <span>Navegar en G-Maps</span>
                         </button>
                     </div>
 
-                    <div id="alert-box" class="p-4 rounded-lg border hidden"></div>
+                    <div id="alert-box" class="p-3 md:p-4 rounded-lg border hidden text-sm"></div>
                 </div>
             </div>
             
-            <div class="bg-slate-50 p-4 border-t text-xs text-slate-500">
-                <p><strong>Motor:</strong> OpenRouteService (ORS) con inyección de exclusión de polígonos.</p>
-                <p class="mt-1 text-red-600 font-semibold cursor-pointer" onclick="alert('Regístrate gratis en openrouteservice.org y pega tu clave en la constante ORS_API_KEY en el código fuente.')">⚠ Requiere ORS API KEY</p>
+            <div class="bg-slate-50 p-3 md:p-4 border-t text-xs text-slate-500 shrink-0 pb-6 md:pb-4">
+                <p><strong>Motor:</strong> ORS con exclusión inyectada.</p>
+                <p class="mt-1 text-red-600 font-semibold">⚠ API KEY REQUERIDA EN CÓDIGO</p>
             </div>
         </aside>
 
-        <div class="flex-1 relative">
+        <div class="flex-1 relative z-10 w-full h-full">
             <div id="map"></div>
+            
+            <div class="absolute bottom-6 md:bottom-8 right-4 z-[400]">
+                <button id="btn-gps" onclick="toggleGPS()" class="bg-white p-3 rounded-full shadow-[0_4px_10px_rgba(0,0,0,0.2)] border border-gray-200 text-gray-600 hover:text-blue-600 transition-colors">
+                    <i class="ph ph-navigation-arrow text-2xl"></i>
+                </button>
+            </div>
         </div>
     </main>
 
@@ -134,12 +164,17 @@
         let zbeData = null; 
         let currentRouteLayer = null;
         let markersLayer = new L.LayerGroup();
-        let currentRouteCoordinates = []; // VARIABLE GLOBAL NUEVA para almacenar el trazado
+        let currentRouteCoordinates = [];
+        
+        // Variables de GPS
+        let gpsWatchId = null;
+        let isGpsActive = false;
+        let userLocationMarker = null;
+        let lastKnownUserCoords = null; // {lat, lon}
         
         const MAP_CENTER = [40.4168, -3.7038]; 
         const MAP_ZOOM = 13;
         const ZBE_BASE_API_URL = "https://sigma.madrid.es/hosted/rest/services/GEOPORTAL/MADRID_ZBE/MapServer/";
-        // Restricción nativa de API: countrycodes=es fuerza resultados exclusivamente en España
         const NOMINATIM_API = "https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=es&q=";
 
         document.addEventListener('DOMContentLoaded', () => {
@@ -147,9 +182,21 @@
             fetchZBEData();
         });
 
+        // --- LÓGICA DE UI RESPONSIVA ---
+        function toggleMobilePanel() {
+            const panel = document.getElementById('control-panel');
+            panel.classList.toggle('panel-hidden');
+        }
+
+        // --- INICIALIZACIÓN DE MAPA ---
         function initMap() {
-            map = L.map('map', { zoomControl: false }).setView(MAP_CENTER, MAP_ZOOM);
-            L.control.zoom({ position: 'bottomright' }).addTo(map);
+            map = L.map('map', { 
+                zoomControl: false,
+                tap: false // Previene problemas de doble toque en Safari iOS
+            }).setView(MAP_CENTER, MAP_ZOOM);
+            
+            L.control.zoom({ position: 'topleft' }).addTo(map); // Movido arriba para evitar solapamiento con controles
+            
             L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
                 attribution: '&copy; OpenStreetMap contributors, &copy; CARTO',
                 maxZoom: 19
@@ -157,6 +204,85 @@
             markersLayer.addTo(map);
         }
 
+        // --- LÓGICA DE GEOLOCALIZACIÓN (GPS) ---
+        function toggleGPS() {
+            const btn = document.getElementById('btn-gps');
+            
+            if (!navigator.geolocation) {
+                showSystemAlert("Tu navegador no soporta la API de Geolocalización hardware.", "error");
+                return;
+            }
+
+            if (isGpsActive) {
+                // Detener rastreo
+                navigator.geolocation.clearWatch(gpsWatchId);
+                isGpsActive = false;
+                btn.classList.remove('text-blue-600', 'bg-blue-50');
+                btn.classList.add('text-gray-600', 'bg-white');
+                if (userLocationMarker) {
+                    map.removeLayer(userLocationMarker);
+                    userLocationMarker = null;
+                }
+            } else {
+                // Iniciar rastreo riguroso
+                isGpsActive = true;
+                btn.classList.remove('text-gray-600', 'bg-white');
+                btn.classList.add('text-blue-600', 'bg-blue-50');
+                
+                // Animación de carga visual en el botón
+                btn.innerHTML = `<i class="ph ph-spinner-gap animate-spin text-2xl"></i>`;
+
+                gpsWatchId = navigator.geolocation.watchPosition(
+                    (position) => {
+                        const lat = position.coords.latitude;
+                        const lon = position.coords.longitude;
+                        const accuracy = position.coords.accuracy;
+                        lastKnownUserCoords = {lat, lon};
+
+                        btn.innerHTML = `<i class="ph-fill ph-navigation-arrow text-2xl"></i>`;
+
+                        if (!userLocationMarker) {
+                            // Crear marcador con efecto de pulso
+                            const icon = L.divIcon({
+                                className: 'custom-user-icon',
+                                html: `<div class="user-locator-pulse"></div>`,
+                                iconSize: [16, 16],
+                                iconAnchor: [8, 8]
+                            });
+                            userLocationMarker = L.marker([lat, lon], {icon: icon, zIndexOffset: 1000}).addTo(map);
+                            map.setView([lat, lon], 16); // Centrar agresivamente la primera vez
+                        } else {
+                            userLocationMarker.setLatLng([lat, lon]);
+                        }
+                    },
+                    (error) => {
+                        console.warn("Fallo en sensor GPS:", error);
+                        toggleGPS(); // Desactivar si falla
+                        let errorMsg = "Fallo desconocido.";
+                        if (error.code === 1) errorMsg = "Permiso de ubicación denegado por el usuario o navegador.";
+                        if (error.code === 2) errorMsg = "Posición GPS no disponible físicamente.";
+                        if (error.code === 3) errorMsg = "Excedido tiempo de espera para obtener satélites.";
+                        showSystemAlert(`Error de Hardware GPS: ${errorMsg}`, "error");
+                    },
+                    {
+                        enableHighAccuracy: true, // Fuerza uso de chip GPS en lugar de antenas WiFi/Móvil
+                        maximumAge: 0,
+                        timeout: 10000
+                    }
+                );
+            }
+        }
+
+        function useCurrentLocationForStart() {
+            if (!lastKnownUserCoords) {
+                alert("Primero debes activar el GPS en el mapa y esperar a que te ubique.");
+                return;
+            }
+            // Insertar coordenadas crudas para ser procesadas después
+            document.getElementById('input-start').value = `${lastKnownUserCoords.lat}, ${lastKnownUserCoords.lon}`;
+        }
+
+        // --- SISTEMA BASE (Sin alteraciones funcionales) ---
         function updateSystemStatus(status, type = 'info') {
             const dot = document.getElementById('status-dot');
             const ping = document.getElementById('status-ping');
@@ -173,7 +299,7 @@
         }
 
         async function fetchZBEData() {
-            updateSystemStatus('Descargando topología de Madrid...', 'warning');
+            updateSystemStatus('Descargando topología...', 'warning');
             try {
                 const layersToQuery = [0, 1, 2, 3]; 
                 let allFeatures = [];
@@ -196,18 +322,23 @@
                     style: (feature) => feature.geometry.type !== 'Point' ? { color: '#e11d48', weight: 2, opacity: 0.6, fillColor: '#f43f5e', fillOpacity: 0.15 } : {}
                 }).addTo(map);
 
-                updateSystemStatus(`Datos geolocalizados (${allFeatures.length} obstáculos)`, 'success');
+                updateSystemStatus(`Topología OK (${allFeatures.length} uds)`, 'success');
             } catch (error) {
                 console.error(error);
                 updateSystemStatus('Error topológico', 'error');
             }
         }
 
-        // Geocodificación clásica vía Nominatim (Optimizada estrictamente para España)
         async function geocodeAddress(address) {
             let searchAddress = address.trim();
             
-            // Inspección del string: Solo añadimos "España" si el usuario no lo ha incluido ya (evita "Toledo, España, España")
+            // Si el usuario introdujo coordenadas desde el botón de ubicación
+            const coordRegex = /^-?\d+(\.\d+)?,\s*-?\d+(\.\d+)?$/;
+            if (coordRegex.test(searchAddress)) {
+                const parts = searchAddress.split(',');
+                return { lat: parseFloat(parts[0]), lon: parseFloat(parts[1]) };
+            }
+
             if (!/españa|spain/i.test(searchAddress)) {
                 searchAddress += ', España';
             }
@@ -216,10 +347,9 @@
             const data = await response.json();
             
             if (data && data.length > 0) return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
-            throw new Error(`Geolocalización fallida: No se ha encontrado la ubicación "${address}" dentro de España.`);
+            throw new Error(`Geolocalización fallida: No se ha encontrado "${address}".`);
         }
 
-        // --- EL NÚCLEO ARQUITECTÓNICO MEJORADO ---
         function buildAvoidancePolygons(startPoint, endPoint) {
             if (!zbeData) return null;
             let avoidPolygonsCoords = [];
@@ -229,25 +359,16 @@
                     let startInside = false;
                     let endInside = false;
 
-                    // NUEVO: Detectar si el origen o destino están DENTRO del polígono.
                     if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon') {
                         startInside = turf.booleanPointInPolygon(startPoint, feature);
                         endInside = turf.booleanPointInPolygon(endPoint, feature);
                     }
 
-                    // Si el usuario empieza o termina dentro de esta zona, es imposible evitarla. La ignoramos de las restricciones.
-                    if (startInside || endInside) {
-                        return; // Omitimos este obstáculo para que el motor pueda sacarnos o meternos del área
-                    }
+                    if (startInside || endInside) return; 
 
                     if (feature.geometry.type === 'Point') {
                         const buffered = turf.buffer(feature, 0.05, {units: 'kilometers', steps: 4});
-                        
-                        // Verificar que tampoco empiece exactamente encima del punto buffer de la cámara
-                        if (turf.booleanPointInPolygon(startPoint, buffered) || turf.booleanPointInPolygon(endPoint, buffered)) {
-                            return;
-                        }
-                        
+                        if (turf.booleanPointInPolygon(startPoint, buffered) || turf.booleanPointInPolygon(endPoint, buffered)) return;
                         avoidPolygonsCoords.push(buffered.geometry.coordinates);
                     } else if (feature.geometry.type === 'Polygon') {
                         const simplified = turf.simplify(feature, {tolerance: 0.005, highQuality: false});
@@ -272,7 +393,7 @@
 
         async function fetchEvadingRoute(start, end, avoidGeometry) {
             if (ORS_API_KEY === "TU_API_KEY_DE_OPENROUTESERVICE_AQUI") {
-                throw new Error("SISTEMA BLOQUEADO: Debes configurar una API Key de OpenRouteService válida en el código fuente para realizar enrutamiento avanzado.");
+                throw new Error("SISTEMA BLOQUEADO: API Key de ORS requerida.");
             }
 
             const payload = {
@@ -289,33 +410,19 @@
             try {
                 response = await fetch("https://api.openrouteservice.org/v2/directions/driving-car/geojson", {
                     method: "POST",
-                    headers: {
-                        "Accept": "application/json, application/geo+json",
-                        "Content-Type": "application/json",
-                        "Authorization": ORS_API_KEY
-                    },
+                    headers: { "Accept": "application/json, application/geo+json", "Content-Type": "application/json", "Authorization": ORS_API_KEY },
                     body: JSON.stringify(payload)
                 });
             } catch (networkError) {
-                console.error("Error Crítico de Red o CORS:", networkError);
-                throw new Error("Fallo de conexión con el motor ORS (Failed to fetch). Revisa que la clave sea válida.");
+                throw new Error("Fallo de conexión con motor ORS (Failed to fetch). Revisa API Key.");
             }
 
             if (!response.ok) {
                 let errData;
-                try {
-                    errData = await response.json();
-                } catch(e) {
-                    throw new Error(`Fallo del motor ORS (HTTP ${response.status}).`);
-                }
-                
+                try { errData = await response.json(); } catch(e) { throw new Error(`Fallo HTTP ${response.status}.`); }
                 const errMsg = errData.error?.message || "";
-                // NUEVO: Capturar específicamente el error de "Route could not be found" (Código 2010 u otro equivalente)
-                if (errData.error?.code === 2010 || errMsg.toLowerCase().includes("could not be found")) {
-                    throw new Error("ROUTE_NOT_FOUND"); // Etiqueta técnica controlada para ejecutar el Plan B
-                }
-                
-                throw new Error(`Fallo del motor ORS: ${errMsg || response.statusText}`);
+                if (errData.error?.code === 2010 || errMsg.toLowerCase().includes("could not be found")) throw new Error("ROUTE_NOT_FOUND"); 
+                throw new Error(`Fallo motor ORS: ${errMsg}`);
             }
 
             return await response.json();
@@ -332,31 +439,33 @@
 
             if (!startInput || !endInput) return alert("Faltan datos de origen o destino.");
 
+            // Si está en móvil, auto-ocultamos el panel para ver el progreso en el mapa
+            const panel = document.getElementById('control-panel');
+            if (window.innerWidth < 768 && !panel.classList.contains('panel-hidden')) {
+                toggleMobilePanel();
+            }
+
             btn.disabled = true;
             resultsPanel.classList.remove('hidden');
             loadingIndicator.classList.remove('hidden');
             routeInfo.classList.add('hidden');
             alertBox.classList.add('hidden');
-            document.getElementById('btn-export-gmaps').classList.add('hidden'); // Ocultar botón al recalcular
+            document.getElementById('btn-export-gmaps').classList.add('hidden'); 
             
             if (currentRouteLayer) map.removeLayer(currentRouteLayer);
-            markersLayer.clearLayers();
-            currentRouteCoordinates = []; // Limpiar trazado anterior
+            currentRouteCoordinates = []; 
 
             try {
-                // 1. Geocodificar
                 const startCoords = await geocodeAddress(startInput);
                 const endCoords = await geocodeAddress(endInput);
 
                 createCustomMarker(startCoords.lat, startCoords.lon, 'A', '#4f46e5').addTo(markersLayer); 
                 createCustomMarker(endCoords.lat, endCoords.lon, 'B', '#10b981').addTo(markersLayer); 
 
-                // 2. Construir matriz matemática (Omitiendo zonas donde el coche ya está dentro)
                 const startPoint = turf.point([startCoords.lon, startCoords.lat]);
                 const endPoint = turf.point([endCoords.lon, endCoords.lat]);
                 const obstaclesMultiPolygon = buildAvoidancePolygons(startPoint, endPoint);
 
-                // 3. Sistema de Evasión con Fallback
                 let routeData;
                 let isSafe = true;
 
@@ -365,23 +474,19 @@
                         routeData = await fetchEvadingRoute(startCoords, endCoords, obstaclesMultiPolygon);
                     } catch (evasionError) {
                         if (evasionError.message === "ROUTE_NOT_FOUND") {
-                            console.warn("Evasión imposible o calles bloqueadas. Ejecutando ruteo estándar sin restricciones...");
-                            // PLAN B: Ruta normal ignorando todas las restricciones
                             routeData = await fetchEvadingRoute(startCoords, endCoords, null);
                             isSafe = false;
                         } else {
-                            throw evasionError; // Otros errores de red/API
+                            throw evasionError; 
                         }
                     }
                 } else {
-                    // Si no hubo obstáculos (ej: no se cargaron los datos)
                     routeData = await fetchEvadingRoute(startCoords, endCoords, null);
                 }
 
                 const feature = routeData.features[0];
-                currentRouteCoordinates = feature.geometry.coordinates; // GUARDAMOS EL TRAZADO PARA EXPORTAR
+                currentRouteCoordinates = feature.geometry.coordinates;
 
-                // 4. Dibujar la ruta ganadora (Azul/Punteada si es segura, Roja sólida si es el Plan B)
                 const routeColor = isSafe ? '#4f46e5' : '#ef4444';
                 const dashArray = isSafe ? '5, 10' : null;
 
@@ -389,33 +494,33 @@
                     style: { color: routeColor, weight: 6, opacity: 0.9, dashArray: dashArray }
                 }).addTo(map);
 
-                map.fitBounds(currentRouteLayer.getBounds(), { padding: [50, 50] });
+                map.fitBounds(currentRouteLayer.getBounds(), { padding: [20, 20] }); // Padding ajustado para móvil
 
                 document.getElementById('route-dist').textContent = (feature.properties.summary.distance / 1000).toFixed(2);
                 document.getElementById('route-time').textContent = Math.round(feature.properties.summary.duration / 60);
                 routeInfo.classList.remove('hidden');
 
-                // Mostrar botón de Google Maps solo si la ruta se calculó (sea segura o fallback)
                 if (currentRouteCoordinates.length > 0) {
                     document.getElementById('btn-export-gmaps').classList.remove('hidden');
                 }
 
-                // Mostrar el diagnóstico acorde
                 if (isSafe) {
-                    showSystemAlert(
-                        "Operación Exitosa: El algoritmo modificó activamente la ruta para esquivar las cámaras y zonas restringidas ZBE.", 
-                        "success"
-                    );
+                    showSystemAlert("Evasión Exitosa calculada.", "success");
                 } else {
-                    showSystemAlert(
-                        "Evasión Imposible: La densidad de las ZBE y cámaras cortan todas las rutas posibles entre estos dos puntos. Se muestra la ruta óptima, pero cometerás infracción.", 
-                        "danger"
-                    );
+                    showSystemAlert("Evasión Imposible. Ruta óptima con infracción mostrada.", "danger");
+                }
+                
+                // Si está en móvil, volvemos a mostrar el panel para que vea el botón de Google Maps
+                if (window.innerWidth < 768 && panel.classList.contains('panel-hidden')) {
+                    setTimeout(toggleMobilePanel, 800);
                 }
 
             } catch (error) {
                 console.error(error);
                 showSystemAlert(`Fallo del sistema: ${error.message}`, 'error');
+                if (window.innerWidth < 768 && panel.classList.contains('panel-hidden')) {
+                    toggleMobilePanel();
+                }
             } finally {
                 loadingIndicator.classList.add('hidden');
                 btn.disabled = false;
@@ -425,9 +530,9 @@
         function createCustomMarker(lat, lng, label, color) {
             const icon = L.divIcon({
                 className: 'custom-icon',
-                html: `<div class="custom-marker" style="background-color: ${color}; width: 30px; height: 30px;">${label}</div>`,
-                iconSize: [30, 30],
-                iconAnchor: [15, 15]
+                html: `<div class="custom-marker" style="background-color: ${color}; width: 24px; height: 24px; font-size: 12px;">${label}</div>`,
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
             });
             return L.marker([lat, lng], { icon: icon });
         }
@@ -439,21 +544,18 @@
             let icon = '';
             if (type === 'danger' || type === 'error') {
                 box.classList.add('bg-red-50', 'border-red-200', 'text-red-800');
-                icon = '<i class="ph-fill ph-warning-octagon text-xl"></i>';
+                icon = '<i class="ph-fill ph-warning-octagon text-lg"></i>';
             } else if (type === 'success') {
                 box.classList.add('bg-green-50', 'border-green-200', 'text-green-800');
-                icon = '<i class="ph-fill ph-check-circle text-xl"></i>';
+                icon = '<i class="ph-fill ph-check-circle text-lg"></i>';
             }
 
-            box.innerHTML = `<div class="flex items-start gap-3"><div class="mt-0.5">${icon}</div><p class="text-sm font-medium leading-relaxed">${message}</p></div>`;
+            box.innerHTML = `<div class="flex items-start gap-2"><div class="mt-0.5">${icon}</div><p class="font-medium leading-tight">${message}</p></div>`;
             box.classList.remove('hidden');
         }
 
-        // --- NUEVA FUNCIÓN: EXPORTACIÓN A GOOGLE MAPS ---
         function exportToGoogleMaps() {
             if (!currentRouteCoordinates || currentRouteCoordinates.length < 2) return;
-
-            // ORS devuelve [lon, lat], Google Maps necesita [lat, lon]
             const coords = currentRouteCoordinates;
             const startNode = coords[0];
             const endNode = coords[coords.length - 1];
@@ -461,29 +563,21 @@
             const originStr = `${startNode[1]},${startNode[0]}`;
             const destStr = `${endNode[1]},${endNode[0]}`;
 
-            // Límite práctico de Waypoints en la URL de Google Maps es ~9.
-            // Extraeremos 8 puntos intermedios equidistantes del trazado de ORS para guiar a Google.
             const maxWaypoints = 8;
             let waypoints = [];
 
             if (coords.length > 2) {
-                // Calcular el salto para tomar puntos espaciados uniformemente
                 const step = Math.max(1, Math.floor((coords.length - 2) / (maxWaypoints + 1)));
-                
                 for (let i = step; i < coords.length - 1 && waypoints.length < maxWaypoints; i += step) {
                     waypoints.push(`${coords[i][1]},${coords[i][0]}`);
                 }
             }
 
-            // Construcción de la URL de navegación de Google Maps
-            let gmapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${originStr}&destination=${destStr}&travelmode=driving`;
-            
+            let gmapsUrl = `http://googleusercontent.com/maps.google.com/5{originStr}&destination=${destStr}&travelmode=driving`;
             if (waypoints.length > 0) {
-                // Añadimos los puntos intermedios unidos por el caracter pipe "|"
                 gmapsUrl += `&waypoints=${waypoints.join('%7C')}`;
             }
 
-            // Abrir en nueva pestaña (en un móvil suele disparar la app nativa de Google Maps)
             window.open(gmapsUrl, '_blank');
         }
     </script>
