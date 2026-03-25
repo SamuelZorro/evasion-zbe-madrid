@@ -92,7 +92,8 @@
                         <div class="relative flex gap-2">
                             <div class="relative flex-1">
                                 <i class="ph ph-map-pin absolute left-3 top-3 text-gray-400"></i>
-                                <input type="text" id="input-start" placeholder="Ej: Toledo" 
+                                <!-- Aviso: Dado el bounding box de Madrid, la búsqueda de 'Toledo' como ciudad fallará, he adaptado el placeholder -->
+                                <input type="text" id="input-start" placeholder="Ej: Getafe" 
                                     class="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 outline-none transition-all shadow-sm">
                             </div>
                             <button onclick="useCurrentLocationForStart()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 p-2 rounded-lg border border-gray-300 transition-colors shrink-0" title="Usar mi ubicación actual">
@@ -140,7 +141,7 @@
             </div>
             
             <div class="p-4 border-t bg-gray-50 shrink-0">
-                <p class="text-xs text-gray-500 text-center mb-3">Nota: La ruta evitará un radio de 50 metros alrededor de cada cámara OCR o foto-rojo descargada del geoportal.</p>
+                <p class="text-xs text-gray-500 text-center mb-3">Nota: La ruta evitará un radio ampliado de <strong>75 metros</strong> alrededor de cada cámara OCR o foto-rojo para compensar rebotes de señal GPS. <strong>Además, solo están permitidas busquedas dentro de la Comunidad de Madrid.</strong></p>
             </div>
         </aside>
 
@@ -160,8 +161,6 @@
 
     <script>
         // --- CONFIGURACIÓN DEL SISTEMA ---
-        // IMPORTANTE: El usuario debe proporcionar su propia API key de OpenRouteService.
-        // No se deja una por defecto por políticas de abuso y cuotas.
         const ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjA0M2YxYjIyMzg0NTQ2ZmFhMDEwYTZiZjJhN2Q4YjYzIiwiaCI6Im11cm11cjY0In0="; 
         
         const ZBE_BASE_API_URL = "https://sigma.madrid.es/hosted/rest/services/GEOPORTAL/MADRID_ZBE/MapServer/";
@@ -170,8 +169,13 @@
         const MAP_CENTER = [40.4168, -3.7038];
         const MAP_ZOOM = 13;
 
+        // Caché config
+        const CACHE_KEY = "zbe_madrid_cameras_data";
+        const CACHE_TIME_KEY = "zbe_madrid_cameras_time";
+        const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 Horas
+
         let map;
-        let zbeData = null; // Guardará solo las cámaras
+        let zbeData = null; 
         let currentRouteLayer = null;
         let markersLayer = L.layerGroup();
         let userLocationMarker = null;
@@ -187,7 +191,6 @@
             initMap();
             fetchZBEData();
             
-            // Si falta la API Key, avisamos inmediatamente
             if (ORS_API_KEY === "TU_API_KEY_DE_OPENROUTESERVICE_AQUI") {
                 showSystemAlert("Atención: Debes introducir tu API Key de OpenRouteService en el código para calcular rutas.", "error");
             }
@@ -201,7 +204,7 @@
         function initMap() {
             map = L.map('map', {
                 zoomControl: false,
-                tap: false // Evita problemas de doble toque en Safari iOS
+                tap: false 
             }).setView(MAP_CENTER, MAP_ZOOM);
             
             L.control.zoom({ position: 'topleft' }).addTo(map);
@@ -214,7 +217,7 @@
             markersLayer.addTo(map);
         }
 
-        // --- LÓGICA DE GEOLOCALIZACIÓN (GPS) ---
+        // --- LÓGICA DE GEOLOCALIZACIÓN (GPS) CON AUDITORÍA DE PRECISIÓN ---
         function toggleGPS() {
             const btn = document.getElementById('btn-gps');
             if (!navigator.geolocation) {
@@ -223,28 +226,31 @@
             }
 
             if (isGpsActive) {
-                // Detener rastreo
                 navigator.geolocation.clearWatch(gpsWatchId);
                 isGpsActive = false;
-                btn.classList.remove('text-red-600', 'bg-red-50', 'border-red-300');
-                btn.classList.add('text-gray-600', 'bg-white', 'border-gray-300');
                 if (userLocationMarker) {
                     map.removeLayer(userLocationMarker);
                     userLocationMarker = null;
                 }
             } else {
-                // Iniciar rastreo riguroso
                 isGpsActive = true;
-                btn.classList.remove('text-gray-600', 'bg-white', 'border-gray-300');
-                btn.classList.add('text-red-600', 'bg-red-50', 'border-red-300');
-                
                 showSystemAlert("Buscando satélites GPS...", "warning");
                 
                 gpsWatchId = navigator.geolocation.watchPosition(
                     (position) => {
                         const lat = position.coords.latitude;
                         const lon = position.coords.longitude;
-                        lastKnownPosition = { lat, lon };
+                        const accuracy = position.coords.accuracy;
+                        
+                        lastKnownPosition = { lat, lon, accuracy };
+
+                        // Alerta si la precisión es peor que 50 metros
+                        if (accuracy > 50) {
+                            showSystemAlert(`Señal inestable. Precisión: ${Math.round(accuracy)}m. Riesgo en límites ZBE.`, "warning");
+                        } else {
+                            // Limpiar alerta si es buena
+                            document.getElementById('system-alert').classList.add('hidden');
+                        }
                         
                         if (!userLocationMarker) {
                             userLocationMarker = L.marker([lat, lon], {
@@ -256,8 +262,6 @@
                                 })
                             }).addTo(map);
                             map.setView([lat, lon], 16);
-                            showSystemAlert("Señal GPS asegurada.", "success");
-                            document.getElementById('system-alert').classList.add('hidden'); // Ocultar tras éxito
                         } else {
                             userLocationMarker.setLatLng([lat, lon]);
                         }
@@ -265,7 +269,7 @@
                     (error) => {
                         console.error("GPS Error:", error);
                         showSystemAlert("Error de señal GPS: " + error.message, "error");
-                        toggleGPS(); // Desactivar si falla
+                        toggleGPS(); 
                     },
                     { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
                 );
@@ -284,12 +288,21 @@
         function useCurrentLocationForStart() {
             if (lastKnownPosition) {
                 document.getElementById('input-start').value = `${lastKnownPosition.lat.toFixed(5)}, ${lastKnownPosition.lon.toFixed(5)}`;
+                if (lastKnownPosition.accuracy > 50) {
+                    showSystemAlert(`Se ha fijado la posición pero la precisión actual es baja (${Math.round(lastKnownPosition.accuracy)}m)`, "warning");
+                }
             } else {
-                // Forzar una lectura única si el watch no está activo
                 navigator.geolocation.getCurrentPosition(
                     (pos) => {
-                        lastKnownPosition = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+                        const accuracy = pos.coords.accuracy;
+                        lastKnownPosition = { lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: accuracy };
                         document.getElementById('input-start').value = `${lastKnownPosition.lat.toFixed(5)}, ${lastKnownPosition.lon.toFixed(5)}`;
+                        
+                        if (accuracy > 50) {
+                            showSystemAlert(`Origen establecido con precisión baja (${Math.round(accuracy)}m).`, "warning");
+                        } else {
+                            document.getElementById('system-alert').classList.add('hidden');
+                        }
                     },
                     (err) => showSystemAlert("No se pudo obtener la ubicación.", "error"),
                     { enableHighAccuracy: true }
@@ -297,7 +310,7 @@
             }
         }
 
-        // --- SISTEMA DE DATOS Y TOPOLOGÍA (SOLO CÁMARAS) ---
+        // --- SISTEMA DE DATOS Y TOPOLOGÍA CON CACHÉ LOCAL ---
         function updateSystemStatus(text, type) {
             document.getElementById('status-text').textContent = text;
             const dot = document.getElementById('status-dot');
@@ -315,14 +328,53 @@
             }
         }
 
+        function renderCamerasOnMap(data) {
+            L.geoJSON(data, {
+                pointToLayer: (feature, latlng) => {
+                    return L.circleMarker(latlng, {
+                        radius: 6,
+                        fillColor: "#ef4444", 
+                        color: "#7f1d1d", 
+                        weight: 2,
+                        opacity: 1,
+                        fillOpacity: 0.8
+                    }).bindPopup(`
+                        <div class="text-xs">
+                            <b class="text-red-600">Dispositivo Sancionador</b><br>
+                            Tipo: ${feature.properties.NOMBRE || 'Cámara'}<br>
+                            <i>Radio de evasión forzado: 75m</i>
+                        </div>
+                    `);
+                }
+            }).addTo(map);
+        }
+
         async function fetchZBEData() {
-            updateSystemStatus('Descargando topología de cámaras...', 'warning');
+            updateSystemStatus('Cargando topología...', 'warning');
             
+            // Verificación de Caché
+            const cachedData = localStorage.getItem(CACHE_KEY);
+            const cachedTime = localStorage.getItem(CACHE_TIME_KEY);
+
+            if (cachedData && cachedTime) {
+                const ageMs = Date.now() - parseInt(cachedTime);
+                if (ageMs < CACHE_TTL_MS) {
+                    try {
+                        zbeData = JSON.parse(cachedData);
+                        renderCamerasOnMap(zbeData);
+                        updateSystemStatus(`Cámaras activas (${zbeData.features.length}) [Caché]`, 'success');
+                        console.log("Cámaras cargadas desde caché local.");
+                        return; // Salir, no hacemos el fetch
+                    } catch (e) {
+                        console.warn("Caché corrupta, procediendo a descarga remota.");
+                        localStorage.removeItem(CACHE_KEY);
+                    }
+                }
+            }
+
+            // Descarga remota si no hay caché o caducó
+            updateSystemStatus('Descargando topología de cámaras...', 'warning');
             try {
-                // MODIFICACIÓN CRÍTICA SEGÚN DIRECTRIZ:
-                // Capa 1: Dispositivos foto-rojos (Multan)
-                // Capa 2: Cámaras OCR control de acceso (Multan)
-                // Se ignoran: 0 (Polígono Área ZBE completa), 3,4,5 (Señales de tráfico)
                 const layersToQuery = [1, 2]; 
                 let allFeatures = [];
 
@@ -340,26 +392,12 @@
                 }
 
                 zbeData = { type: "FeatureCollection", features: allFeatures };
+                
+                // Guardar en Caché
+                localStorage.setItem(CACHE_KEY, JSON.stringify(zbeData));
+                localStorage.setItem(CACHE_TIME_KEY, Date.now().toString());
 
-                // Renderizar solo los puntos físicos de las cámaras
-                L.geoJSON(zbeData, {
-                    pointToLayer: (feature, latlng) => {
-                        return L.circleMarker(latlng, {
-                            radius: 6,
-                            fillColor: "#ef4444", // Rojo peligro
-                            color: "#7f1d1d", // Borde rojo muy oscuro
-                            weight: 2,
-                            opacity: 1,
-                            fillOpacity: 0.8
-                        }).bindPopup(`
-                            <div class="text-xs">
-                                <b class="text-red-600">Dispositivo Sancionador</b><br>
-                                Tipo: ${feature.properties.NOMBRE || 'Cámara'}<br>
-                                <i>Radio de evasión forzado: 50m</i>
-                            </div>
-                        `);
-                    }
-                }).addTo(map);
+                renderCamerasOnMap(zbeData);
 
                 if (allFeatures.length > 0) {
                     updateSystemStatus(`Cámaras activas (${allFeatures.length})`, 'success');
@@ -375,21 +413,26 @@
 
         // --- MOTORES DE ENRUTAMIENTO ---
         async function geocode(query) {
-            // Si parece una coordenada (ej: "40.123, -3.456")
             if (/^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(query)) {
                 const parts = query.split(',');
                 return { lat: parseFloat(parts[0].trim()), lon: parseFloat(parts[1].trim()) };
             }
 
-            const url = `${NOMINATIM_URL}?q=${encodeURIComponent(query)}&format=json&limit=1`;
+            // ACOTACIÓN ESTRICTA A LA COMUNIDAD DE MADRID:
+            // Bounding box aproximado: minLon, maxLat, maxLon, minLat -> Izquierda, Arriba, Derecha, Abajo
+            // viewbox=-4.58,41.17,-3.05,39.88
+            const viewbox = "-4.58,41.17,-3.05,39.88";
+            
+            // bounded=1 fuerza a que los resultados DEBAN estar dentro de esta caja
+            const url = `${NOMINATIM_URL}?q=${encodeURIComponent(query)}&format=json&limit=1&viewbox=${viewbox}&bounded=1`;
+            
             const res = await fetch(url);
             if (!res.ok) throw new Error("Fallo en servicio de geocodificación");
             const data = await res.json();
-            if (data.length === 0) throw new Error(`Lugar no encontrado: ${query}`);
+            if (data.length === 0) throw new Error(`Lugar no encontrado en la Comunidad de Madrid: ${query}`);
             return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
         }
 
-        // Convierte las cámaras en "halos ciegos" de 50 metros de radio
         function buildAvoidancePolygons() {
             if (!zbeData || !zbeData.features || zbeData.features.length === 0) return null;
             
@@ -398,10 +441,9 @@
                 
                 zbeData.features.forEach(feature => {
                     const geom = feature.geometry;
-                    // Ya solo descargamos "Points", pero nos aseguramos
                     if (geom && geom.type === "Point") {
-                        // Generar buffer de 50 metros (0.05km) alrededor de la cámara
-                        const buffered = turf.buffer(geom, 0.05, {units: 'kilometers'});
+                        // MODIFICADO A 75 METROS PARA COMPENSAR GPS BOUNCE
+                        const buffered = turf.buffer(geom, 0.075, {units: 'kilometers'});
                         avoidPolygonsCoords.push(buffered.geometry.coordinates);
                     }
                 });
@@ -429,7 +471,6 @@
                 instructions: false
             };
 
-            // Solo inyectamos los polígonos de exclusión si existen
             if (avoidGeometry && avoidGeometry.coordinates.length > 0) {
                 payload.options = { avoid_polygons: avoidGeometry };
             }
@@ -500,14 +541,11 @@
             toggleLoader(true, "Triangulando puntos y calculando polígonos de exclusión de cámaras...");
 
             try {
-                // 1. Geocodificar (resolver texto a coordenadas)
                 const startCoords = await geocode(startInput);
                 const endCoords = await geocode(endInput);
 
-                // 2. Construir matriz de exclusión (solo los halos de 50m alrededor de cámaras)
                 const avoidanceGeometry = buildAvoidancePolygons();
 
-                // 3. Solicitar Ruta Esquivando Cámaras
                 toggleLoader(true, "Trazando ruta evasiva con motor neuronal...");
                 const routeData = await fetchEvadingRoute(startCoords, endCoords, avoidanceGeometry);
 
@@ -518,21 +556,18 @@
                 const feature = routeData.features[0];
                 currentRouteCoordinates = feature.geometry.coordinates; 
                 
-                // 4. Limpiar mapa e inyectar nueva ruta
                 if (currentRouteLayer) map.removeLayer(currentRouteLayer);
                 markersLayer.clearLayers();
 
-                // Marcadores Inicio/Fin
                 const startHtml = `<div class="custom-marker bg-slate-800 w-8 h-8"><i class="ph ph-map-pin"></i></div>`;
                 const endHtml = `<div class="custom-marker bg-green-600 w-8 h-8"><i class="ph ph-flag-checkered"></i></div>`;
                 
                 L.marker([startCoords.lat, startCoords.lon], { icon: L.divIcon({ html: startHtml, className: '' }) }).addTo(markersLayer);
                 L.marker([endCoords.lat, endCoords.lon], { icon: L.divIcon({ html: endHtml, className: '' }) }).addTo(markersLayer);
 
-                // Dibujar Línea de Ruta
                 currentRouteLayer = L.geoJSON(feature, {
                     style: {
-                        color: "#4f46e5", // Indigo
+                        color: "#4f46e5", 
                         weight: 6,
                         opacity: 0.9
                     }
@@ -540,23 +575,25 @@
 
                 map.fitBounds(currentRouteLayer.getBounds(), { padding: [20, 20] });
 
-                // Actualizar Stats
                 document.getElementById('route-dist').textContent = (feature.properties.summary.distance / 1000).toFixed(2);
                 document.getElementById('route-time').textContent = Math.round(feature.properties.summary.duration / 60);
                 document.getElementById('route-stats').classList.remove('hidden');
                 
-                // Mostrar botón de exportación
                 document.getElementById('btn-export').classList.remove('hidden');
                 document.getElementById('btn-export').classList.add('flex');
                 
-                // Ocultar panel en móvil tras éxito
                 if (window.innerWidth < 768) {
                     document.getElementById('control-panel').classList.add('panel-hidden');
                 }
 
             } catch (error) {
                 console.error("Error en cálculo:", error);
-                showSystemAlert(error.message, "error");
+                // Ajuste semántico de la alerta si falla por Bounding Box
+                let msg = error.message;
+                if(msg.includes('Lugar no encontrado')) {
+                    msg += " (Recuerda que la búsqueda está restringida a la Comunidad de Madrid).";
+                }
+                showSystemAlert(msg, "error");
             } finally {
                 btn.disabled = false;
                 toggleLoader(false);
@@ -570,11 +607,9 @@
             const startNode = coords[0];
             const endNode = coords[coords.length - 1];
 
-            // Coordenadas en formato Lat,Lng para Google Maps
             const originStr = `${startNode[1]},${startNode[0]}`;
             const destStr = `${endNode[1]},${endNode[0]}`;
 
-            // GMaps permite máx ~9 waypoints por URL. Tomamos muestras a lo largo de la ruta para "forzar" a GMaps a seguir la forma evadiendo cámaras.
             const maxWaypoints = 8;
             let waypoints = [];
 
