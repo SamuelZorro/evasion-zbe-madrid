@@ -362,7 +362,7 @@
                     try {
                         zbeData = JSON.parse(cachedData);
                         renderCamerasOnMap(zbeData);
-                        updateSystemStatus(`Cámaras activas (${zbeData.features.length}) [Caché]`, 'success');
+                        updateSystemStatus(`Cámaras activas (${zbeData.features.length})`, 'success');
                         console.log("Cámaras cargadas desde caché local.");
                         return; // Salir, no hacemos el fetch
                     } catch (e) {
