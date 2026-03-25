@@ -15,7 +15,7 @@
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
 
     <style>
-        body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; }
+        body, html { margin: 0; padding: 0; height: 100dvh; width: 100%; overflow: hidden; }
         #map { height: 100%; width: 100%; z-index: 10; }
         .loader {
             border: 3px solid #f3f3f3;
@@ -56,33 +56,34 @@
         }
     </style>
 </head>
-<body class="bg-gray-50 flex flex-col h-screen font-sans text-gray-800 relative">
+<body class="bg-gray-50 flex flex-col h-[100dvh] font-sans text-gray-800 relative">
 
-    <header class="bg-slate-900 text-white p-3 md:p-4 shadow-md flex justify-between items-center z-30 relative shrink-0">
+    <header class="bg-slate-900 text-white p-3 md:p-4 shadow-md flex justify-between items-center z-[2000] relative shrink-0">
         <div class="flex items-center gap-2">
             <i class="ph-fill ph-camera text-xl md:text-2xl text-red-500"></i>
             <h1 class="text-lg md:text-xl font-bold tracking-tight">Generador de Rutas Anti-ZBE Madrid<span class="text-xs font-normal text-gray-400 ml-2">Solo Cámaras</span></h1>
         </div>
         <div id="system-status" class="flex items-center gap-2 text-xs md:text-sm">
-            <span class="flex h-3 w-3 relative">
+            <span class="flex h-3 w-3 relative shrink-0">
                 <span id="status-ping" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
                 <span id="status-dot" class="relative inline-flex rounded-full h-3 w-3 bg-yellow-500"></span>
             </span>
-            <span id="status-text" class="hidden sm:inline">Inicializando...</span>
+            <span id="status-text" class="whitespace-nowrap">Inicializando...</span>
         </div>
     </header>
 
     <main class="flex-1 flex flex-col md:flex-row relative z-10 overflow-hidden">
-        
-        <div class="md:hidden absolute bottom-[calc(100%-3rem)] w-full bg-white z-30 rounded-t-2xl shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] cursor-pointer border-b" id="mobile-toggle" onclick="toggleMobilePanel()">
-            <div class="flex justify-center items-center h-12">
-                <div class="w-12 h-1.5 bg-gray-300 rounded-full mb-1"></div>
-            </div>
-            <div class="absolute top-3 left-4 text-sm font-bold text-gray-600">Ruta & Controles</div>
-        </div>
 
-        <aside id="control-panel" class="w-full md:w-96 bg-white shadow-xl flex flex-col z-20 absolute md:relative bottom-0 md:bottom-auto h-[75vh] md:h-full rounded-t-2xl md:rounded-none panel-hidden">
-            <div class="p-4 md:p-6 flex-1 overflow-y-auto mt-10 md:mt-0">
+        <aside id="control-panel" class="w-full md:w-96 bg-white shadow-xl flex flex-col z-[2000] absolute md:relative bottom-0 md:bottom-auto h-[75vh] md:h-full rounded-t-2xl md:rounded-none panel-hidden">
+            
+            <div class="md:hidden w-full bg-white z-30 rounded-t-2xl shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] cursor-pointer border-b shrink-0 relative" id="mobile-toggle" onclick="toggleMobilePanel()">
+                <div class="flex justify-center items-center h-12">
+                    <div class="w-12 h-1.5 bg-gray-300 rounded-full mb-1"></div>
+                </div>
+                <div class="absolute top-3 left-4 text-sm font-bold text-gray-600">Menú de Busqueda 🔎</div>
+            </div>
+
+            <div class="p-4 md:p-6 flex-1 overflow-y-auto">
                 <h2 class="text-lg font-semibold mb-4 text-slate-800 border-b pb-2 hidden md:block">Introduce los datos</h2>
                 
                 <div class="space-y-4">
